@@ -1,8 +1,10 @@
-import { Controller, Get, Query, Param, HttpException, HttpStatus, Sse, MessageEvent } from '@nestjs/common';
-import { Observable, merge, from } from 'rxjs';
+import { Controller, Get, Query, Param, HttpException, HttpStatus, Res, Req } from '@nestjs/common';
+import { Observable, merge, from, Subscription } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { NewsService } from '../services/news.service';
 import { SseService } from '../services/sse.service';
+import { Request, Response } from 'express';
+import { MessageEvent } from '@nestjs/common';
 
 @Controller('news')
 export class NewsController {
@@ -26,27 +28,37 @@ export class NewsController {
       throw new HttpException('获取新闻列表失败', HttpStatus.INTERNAL_SERVER_ERROR);
     }
   }
-  @Sse('sse')
-  async subscribeToNews(): Promise<Observable<MessageEvent>> {
-    console.log('尝试建立 SSE 连接...');
+
+  @Get('sse')
+  async subscribeToNews(@Req() req: Request, @Res() res: Response) {
+    console.log('尝试建立 SSE 连接 (手动模式)...');
+
+    res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    let subscription: Subscription;
+
     try {
-      // 获取初始数据
       console.log('正在获取初始新闻数据...');
       const initialNews = await this.newsService.getNewsList();
       
       if (!initialNews || !initialNews.data) {
         console.error('没有可用的新闻数据');
-        throw new HttpException('没有可用的新闻数据', HttpStatus.NOT_FOUND);
+        res.write(`event: error\ndata: ${JSON.stringify({ message: '没有可用的新闻数据' })}\n\n`);
+        res.end();
+        return;
       }
 
-      console.log('SSE 连接已建立，初始数据长度:', initialNews.data.length);
+      console.log('SSE 连接已建立 (手动模式)，初始数据长度:', initialNews.data.length);
 
-      // 创建初始数据流
       const initialDataStream = from([initialNews.data]).pipe(
-        map((news): MessageEvent => {
-          console.log('发送初始新闻数据...');
+        map((newsArray): MessageEvent => {
+          console.log('创建初始新闻数据事件...');
           return {
-            data: JSON.stringify(news),
+            data: JSON.stringify(newsArray),
             id: new Date().getTime().toString(),
             type: 'news',
             retry: 15000
@@ -54,24 +66,84 @@ export class NewsController {
         })
       );
 
-      // 合并初始数据流和实时更新流
-      return merge(
-        initialDataStream,
-        this.sseService.getNewsEventObservable().pipe(
-          map((news): MessageEvent => {
-            console.log('发送新闻更新...');
-            return {
-              data: JSON.stringify(news),
-              id: new Date().getTime().toString(),
-              type: 'news',
-              retry: 15000
-            };
-          })
-        )
+      const updateStream = this.sseService.getNewsEventObservable().pipe(
+        map((newsArray): MessageEvent => {
+          console.log('创建新闻更新事件...');
+          return {
+            data: JSON.stringify(newsArray),
+            id: new Date().getTime().toString(),
+            type: 'news',
+            retry: 15000
+          };
+        })
       );
+
+      const messageObservable = merge(initialDataStream, updateStream);
+
+      subscription = messageObservable.subscribe({
+        next: (messageEvent: MessageEvent) => {
+          if (res.writableEnded) {
+             console.warn('SSE connection closed by client, cannot write event.');
+             if (subscription) subscription.unsubscribe();
+             return;
+          }
+          try {
+            let messageString = "";
+            if (messageEvent.type) {
+              messageString += `event: ${messageEvent.type}\n`;
+            }
+            if (messageEvent.id) {
+              messageString += `id: ${messageEvent.id}\n`;
+            }
+            if (messageEvent.retry) {
+              messageString += `retry: ${messageEvent.retry}\n`;
+            }
+            const dataString = typeof messageEvent.data === 'string' ? messageEvent.data : JSON.stringify(messageEvent.data);
+            messageString += `data: ${dataString.replace(/\n/g, '\\ndata: ')}\n\n`;
+
+            console.log('Writing SSE event:', messageString);
+            res.write(messageString);
+          } catch (writeError) {
+             console.error('Error writing to SSE stream:', writeError);
+             if (subscription) subscription.unsubscribe();
+             if (!res.writableEnded) res.end();
+          }
+        },
+        error: (err) => {
+          console.error('Error in SSE Observable:', err);
+          if (!res.writableEnded) {
+             try {
+               res.write(`event: error\ndata: ${JSON.stringify({ message: 'SSE stream error', error: err.message })}\n\n`);
+             } catch (e) { /* ignore */}
+             res.end();
+          }
+        },
+        complete: () => {
+          console.log('SSE Observable completed.');
+          if (!res.writableEnded) {
+            res.end();
+          }
+        }
+      });
+
+      req.on('close', () => {
+        console.log('SSE client disconnected (manual mode).');
+        if (subscription) {
+          subscription.unsubscribe();
+          console.log('Unsubscribed from SSE Observable.');
+        }
+         if (!res.writableEnded) {
+            res.end();
+         }
+      });
+
     } catch (error) {
-      console.error('SSE 连接错误:', error);
-      throw new HttpException('SSE 连接失败', HttpStatus.INTERNAL_SERVER_ERROR);
+      console.error('Error setting up manual SSE:', error);
+       if (!res.headersSent) {
+           res.status(500).send('Internal Server Error setting up SSE');
+       } else if (!res.writableEnded) {
+           res.end();
+       }
     }
   }
   
