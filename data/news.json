@@ -1,0 +1,22 @@
+[
+  {
+    "uniquekey": "1",
+    "title": "示例新闻标题1",
+    "date": "2024-04-14 10:00:00",
+    "category": "top",
+    "author_name": "示例作者1",
+    "url": "http://example.com/news/1",
+    "thumbnail_pic_s": "http://example.com/images/1.jpg",
+    "is_content": 1
+  },
+  {
+    "uniquekey": "2",
+    "title": "示例新闻标题2",
+    "date": "2024-04-14 09:00:00",
+    "category": "guonei",
+    "author_name": "示例作者2",
+    "url": "http://example.com/news/2",
+    "thumbnail_pic_s": "http://example.com/images/2.jpg",
+    "is_content": 1
+  }
+]

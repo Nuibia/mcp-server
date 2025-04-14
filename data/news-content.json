@@ -1,0 +1,20 @@
+{
+  "1": {
+    "uniquekey": "1",
+    "title": "示例新闻标题1",
+    "date": "2024-04-14 10:00:00",
+    "category": "top",
+    "author_name": "示例作者1",
+    "content": "这是示例新闻1的详细内容。这里可以包含很长的新闻正文内容。",
+    "url": "http://example.com/news/1"
+  },
+  "2": {
+    "uniquekey": "2",
+    "title": "示例新闻标题2",
+    "date": "2024-04-14 09:00:00",
+    "category": "guonei",
+    "author_name": "示例作者2",
+    "content": "这是示例新闻2的详细内容。这里可以包含很长的新闻正文内容。",
+    "url": "http://example.com/news/2"
+  }
+}
